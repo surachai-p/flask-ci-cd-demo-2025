@@ -1,37 +1,40 @@
+# Modern Docker Compose - ไม่ต้องระบุ version
+
 services:
+  # Web Application Service
   web:
     build: .
     container_name: flask_app
     ports:
-      - "5001:5001"
+      - "5000:5000"
     environment:
       - FLASK_ENV=development
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://user:pass@db:5432/mydb
     depends_on:
       db:
-        condition: service_healthy
+        condition: service_healthy        # รอจนกว่า db จะ healthy
       redis:
-        condition: service_healthy
+        condition: service_healthy        # รอจนกว่า redis จะ healthy
     volumes:
-      - ./backend:/app
+      - .:/app
     restart: unless-stopped
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
+  # Database Service
   db:
-    image: postgres:16-alpine
+    image: postgres:16-alpine             # PostgreSQL 16 Alpine
     container_name: postgres_db
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: mydb
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass             # ในการใช้งานจริงใช้ secrets
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -40,14 +43,15 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U user -d mydb"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
 
+  # Redis Service
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine                 # Redis 7 Alpine
     container_name: redis_cache
     command: redis-server --appendonly yes
     volumes:
