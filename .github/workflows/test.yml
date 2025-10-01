@@ -26,13 +26,16 @@ jobs:
         with:
           python-version: 3.9
       
-      - run: |
+      - name: Install dependencies
+        run: |
           cd backend
           pip install -r requirements.txt
       
-      - run: |
-          export DATABASE_URL="postgresql://testuser:testpass@localhost:5432/testdb"
+      - name: Run tests
+        run: |
           cd backend
+          export PYTHONPATH=.
+          export DATABASE_URL="postgresql://testuser:testpass@localhost:5432/testdb"
           pytest tests/ -v
         env:
           SECRET_KEY: test-secret-key
