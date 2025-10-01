@@ -33,10 +33,11 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U $POSTGRES_USER "
+          --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+          --health-start-period 30s
           
       redis:
         image: redis:7-alpine
@@ -47,6 +48,7 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+          --health-start-period 20s
 
     steps:
       - name: Checkout code
@@ -57,6 +59,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -66,24 +69,29 @@ jobs:
 
       - name: Set up test environment
         run: |
-          echo 'DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/${{ secrets.POSTGRES_DB }}'' >> $GITHUB_ENV
+          echo "DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/${{ secrets.POSTGRES_DB }}" >> $GITHUB_ENV
           echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
           echo "FLASK_ENV=testing" >> $GITHUB_ENV
 
       - name: Wait for services
         run: |
+          echo "Waiting for PostgreSQL..."
           timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U ${{ secrets.POSTGRES_USER }}; do sleep 2; done'
           echo "✅ PostgreSQL is ready!"
+          
+          echo "Waiting for Redis..."
           timeout 60 bash -c 'until redis-cli -h localhost -p 6379 ping | grep -q PONG; do sleep 2; done'
           echo "✅ Redis is ready!"
 
       - name: Run tests with coverage
         run: |
           cd backend
-          pytest tests/ -v --cov=. --cov-report=xml --cov-report=html
+          pytest tests/ -v --cov=. --cov-report=xml --cov-report=html --cov-report=term
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
+          REDIS_URL: ${{ env.REDIS_URL }}
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          FLASK_ENV: testing
 
       - name: Upload coverage reports
         uses: actions/upload-artifact@v4
@@ -107,6 +115,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -138,6 +147,7 @@ jobs:
         if: always()
         with:
           sarif_file: snyk-code.sarif
+          category: snyk-code
 
       - name: Monitor with Snyk
         if: github.ref == 'refs/heads/main'
@@ -145,7 +155,7 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --file=backend/requirements.txt
+          args: --file=backend/requirements.txt --project-name="${{ github.repository }}"
           command: monitor
 
   # Job ที่ 3: Additional Security Scans
@@ -164,6 +174,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
 
       - name: Run Safety check
         run: |
@@ -260,12 +271,14 @@ jobs:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: 'sarif'
           output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'
 
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
+          category: trivy-container
 
   # Job ที่ 5: Notify Results
   notify:
@@ -292,19 +305,27 @@ jobs:
               'skipped': '⏭️'
             };
             
-            const comment = \`
+            const comment = `
             ## 🚀 CI/CD Pipeline Results
             
             | Job | Status | Result |
             |-----|--------|---------|
-            | Tests | \${statusEmoji[testStatus] || '❓'} | \${testStatus} |
-            | Snyk Security | \${statusEmoji[snykStatus] || '❓'} | \${snykStatus} |
-            | Additional Security | \${statusEmoji[additionalSecurityStatus] || '❓'} | \${additionalSecurityStatus} |
-            | Docker Build | \${statusEmoji[buildStatus] || '❓'} | \${buildStatus} |
+            | Tests | ${statusEmoji[testStatus] || '❓'} | ${testStatus} |
+            | Snyk Security | ${statusEmoji[snykStatus] || '❓'} | ${snykStatus} |
+            | Additional Security | ${statusEmoji[additionalSecurityStatus] || '❓'} | ${additionalSecurityStatus} |
+            | Docker Build | ${statusEmoji[buildStatus] || '❓'} | ${buildStatus} |
             
-            **Commit**: \\\`${{ github.sha }}\\\`
-            **Branch**: \\\`${{ github.head_ref }}\\\`
-            \`;
+            ### 📊 Details
+            - **Commit**: \`${{ github.sha }}\`
+            - **Branch**: \`${{ github.head_ref }}\`
+            - **Triggered by**: @${{ github.actor }}
+            
+            ${testStatus === 'success' && (buildStatus === 'success' || buildStatus === 'skipped')
+              ? '🎉 All critical checks passed! Ready for review.' 
+              : '⚠️ Some checks failed. Please review before merging.'}
+            
+            📋 [View detailed logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
             
             github.rest.issues.createComment({
               issue_number: context.issue.number,
@@ -315,8 +336,31 @@ jobs:
 
       - name: Print summary
         run: |
-          echo "=== Pipeline Summary ==="
-          echo "Test: ${{ needs.test.result }}"
-          echo "Snyk: ${{ needs.security-snyk.result }}"
-          echo "Security: ${{ needs.security-additional.result }}"
-          echo "Build: ${{ needs.build.result }}"
+
+          echo "========================================="
+          echo "    CI/CD PIPELINE SUMMARY"
+          echo "========================================="
+          echo ""
+          echo "📋 Job Results:"
+          echo "  • Tests:                ${{ needs.test.result }}"
+          echo "  • Snyk Security:        ${{ needs.security-snyk.result }}"
+          echo "  • Additional Security:  ${{ needs.security-additional.result }}"
+          echo "  • Build:                ${{ needs.build.result }}"
+          echo ""
+          echo "📦 Metadata:"
+          echo "  • Commit:    ${{ github.sha }}"
+          echo "  • Branch:    ${{ github.ref_name }}"
+          echo "  • Actor:     ${{ github.actor }}"
+          echo "  • Event:     ${{ github.event_name }}"
+          echo ""
+          echo "========================================="
+          
+          if [[ "${{ needs.test.result }}" == "success" ]]; then
+            echo "✅ PIPELINE STATUS: SUCCESS"
+            exit 0
+          else
+            echo "❌ PIPELINE STATUS: FAILED"
+            exit 1
+          fi
+
+
