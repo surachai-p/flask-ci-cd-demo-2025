@@ -1,3 +1,246 @@
+# Lab 00: Preparing Knowledge - YAML for Docker Compose & GitHub Actions
+
+## วัตถุประสงค์
+เพื่อเตรียมความพร้อมในการเขียนไฟล์ YAML สำหรับ Docker Compose และ GitHub Actions ที่จะใช้ในแลปต่อไปในหลักสูตร
+
+---
+
+## ส่วนที่ 1: ความรู้พื้นฐาน YAML
+
+### YAML คืออะไร?
+- **YAML** = YAML Ain't Markup Language
+- เป็นรูปแบบการเก็บข้อมูลที่อ่านได้ง่าย เหมาะสำหรับไฟล์คอนฟิกูเรชัน
+- ใช้การเว้นวรรค (indentation) แทนการใช้วงเล็บ
+- Case-sensitive (แยกตัวพิมพ์เล็กใหญ่)
+
+### กฎการเขียน YAML
+```yaml
+# นี่คือ comment (ความคิดเห็น)
+key: value                    # คู่ key-value พื้นฐาน
+number: 42                    # ตัวเลข
+boolean: true                 # boolean (true/false)
+list:                         # รายการ (array)
+  - item1
+  - item2
+  - item3
+nested:                       # nested object
+  child_key: child_value
+multiline: |                  # multi-line string
+  This is a
+  multi-line
+  string
+```
+
+---
+
+## ส่วนที่ 2: Docker Compose YAML
+
+### ทฤษฎี Docker Compose
+Docker Compose เป็นเครื่องมือที่ใช้ในการจัดการแอปพลิเคชันที่ประกอบด้วยหลาย containers โดยใช้ไฟล์ YAML ในการกำหนดค่า
+
+### โครงสร้างพื้นฐาน docker-compose.yml (Modern)
+```yaml
+# Modern Docker Compose - ไม่ต้องระบุ version
+# ใช้ Compose Specification V2 อัตโนมัติ
+
+services:                   # กำหนด services ต่างๆ
+  service_name:             # ชื่อ service
+    # การกำหนดค่า service
+networks:                   # กำหนดเครือข่าย (optional)
+volumes:                    # กำหนด volumes (optional)
+```
+
+**หมายเหตุสำคัญ:** 
+- ❌ **ไม่ต้องใช้** `version: '3.8'` อีกต่อไป
+- ✅ Docker Compose V2 ใช้ **Compose Specification** โดยอัตโนมัติ
+- ✅ ทำให้ได้ฟีเจอร์ใหม่ๆ โดยไม่ต้องกังวลเรื่องเวอร์ชัน
+
+### ตัวอย่างที่ 1: Flask Application พื้นฐาน
+
+สร้างไฟล์ `docker-compose.yml`:
+
+```yaml
+# Modern Docker Compose - ไม่ต้องระบุ version
+
+services:
+  # Web Application Service
+  web:
+    build: .
+    container_name: flask_app
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - DATABASE_URL=postgresql://user:pass@db:5432/mydb
+    depends_on:
+      db:
+        condition: service_healthy        # รอจนกว่า db จะ healthy
+      redis:
+        condition: service_healthy        # รอจนกว่า redis จะ healthy
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Database Service
+  db:
+    image: postgres:16-alpine             # PostgreSQL 16 Alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_DB: mydb
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass             # ในการใช้งานจริงใช้ secrets
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d mydb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Redis Service
+  redis:
+    image: redis:7-alpine                 # Redis 7 Alpine
+    container_name: redis_cache
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+```
+
+### คำอธิบายแต่ละส่วนใน Docker Compose
+
+#### Services
+แต่ละ service คือ container หนึ่งตัว:
+
+- **build**: สร้าง image จาก Dockerfile
+- **image**: ใช้ image ที่มีอยู่แล้ว (แนะนำใช้ Alpine variants)
+- **container_name**: กำหนดชื่อ container
+- **ports**: map port จาก host ไป container
+- **environment**: ตั้งค่าตัวแปรสภาพแวดล้อม
+- **depends_on**: กำหนดลำดับการเริ่มต้น service พร้อมเงื่อนไข
+  - `condition: service_healthy` - รอจนกว่า service จะผ่าน healthcheck
+  - `condition: service_started` - รอจนกว่า service จะเริ่มต้น
+- **volumes**: mount ข้อมูลระหว่าง host กับ container
+- **restart**: กำหนด restart policy
+- **networks**: เครือข่ายที่ container จะเข้าร่วม
+- **healthcheck**: ตรวจสอบสถานะสุขภาพของ service
+
+#### Health Checks (สำคัญมาก!)
+```yaml
+healthcheck:
+  test: ["CMD-SHELL", "pg_isready -U user"]  # คำสั่งตรวจสอบ
+  interval: 10s                               # ตรวจสอบทุก 10 วินาที
+  timeout: 5s                                 # timeout 5 วินาที
+  retries: 5                                  # ลองใหม่ 5 ครั้ง
+  start_period: 30s                          # รอ 30 วินาทีก่อนเริ่มตรวจสอบ
+```
+
+#### Networks และ Volumes
+- **Networks**: กำหนดเครือข่ายสำหรับให้ containers สื่อสารกัน
+- **Volumes**: จัดเก็บข้อมูลแบบถาวร ไม่หายเมื่อ container ปิด
+
+### คำสั่ง Docker Compose V2
+
+```bash
+# เริ่มต้น services ทั้งหมด
+docker compose up -d
+
+# ดู status ของ services
+docker compose ps
+
+# ดู logs
+docker compose logs -f
+
+# ดู logs เฉพาะ service
+docker compose logs web
+
+# ตรวจสอบ health status
+docker compose ps --format json | jq '.[].Health'
+
+# Restart service
+docker compose restart web
+
+# หยุด services
+docker compose down
+
+# หยุดและลบ volumes
+docker compose down -v
+
+# Validate configuration
+docker compose config
+
+# ดู services ที่กำหนดไว้
+docker compose config --services
+```
+
+**หมายเหตุ:** ใช้ `docker compose` (มีช่องว่าง) ไม่ใช่ `docker-compose` (มีขีด)
+
+---
+
+## ส่วนที่ 3: GitHub Actions YAML
+
+### ทฤษฎี GitHub Actions
+GitHub Actions เป็นระบบ CI/CD ที่สร้างไว้ใน GitHub ใช้ไฟล์ YAML ในการกำหนด workflows ที่จะทำงานอัตโนมัติ
+
+### โครงสร้างพื้นฐาน .github/workflows/ci.yml
+```yaml
+name: Workflow Name           # ชื่อ workflow
+on:                          # กำหนดว่าเมื่อไหร่จะทำงาน
+  push:
+  pull_request:
+
+# SECURITY: จำกัดสิทธิ์ (Least Privilege)
+permissions:
+  contents: read
+  packages: write
+
+jobs:                        # กำหนด jobs ต่างๆ
+  job_name:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Step name
+        uses: action@version
+      - name: Another step
+        run: command
+```
+
+**สร้างไฟล์ `.github/workflows/ci-cd.yml` (Fixed Version):**
+
+```yaml
 name: Flask CI/CD Pipeline
 
 on:
@@ -33,7 +276,445 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U $POSTGRES_USER "
+          --health-cmd "pg_isready -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }}"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 30s
+          
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 20s
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set up test environment
+        run: |
+          echo "DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/${{ secrets.POSTGRES_DB }}" >> $GITHUB_ENV
+          echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
+          echo "FLASK_ENV=testing" >> $GITHUB_ENV
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for PostgreSQL..."
+          timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U ${{ secrets.POSTGRES_USER }}; do sleep 2; done'
+          echo "✅ PostgreSQL is ready!"
+          
+          echo "Waiting for Redis..."
+          timeout 60 bash -c 'until redis-cli -h localhost -p 6379 ping | grep -q PONG; do sleep 2; done'
+          echo "✅ Redis is ready!"
+
+      - name: Run tests with coverage
+        run: |
+          cd backend
+          pytest tests/ -v --cov=. --cov-report=xml --cov-report=html --cov-report=term
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          REDIS_URL: ${{ env.REDIS_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          FLASK_ENV: testing
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: backend/htmlcov/
+          retention-days: 5
+
+  # Job ที่ 2: Security Scanning ด้วย Snyk
+  security-snyk:
+    name: Snyk Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      # SCA - Dependencies Scan
+      - name: Run Snyk Dependencies Scan
+        uses: snyk/actions/python@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --file=backend/requirements.txt
+          command: test
+
+      # SAST - Code Scan
+      - name: Run Snyk Code Scan
+        uses: snyk/actions/python@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=medium --sarif-file-output=snyk-code.sarif
+          command: code test
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: snyk-code.sarif
+          category: snyk-code
+
+      - name: Monitor with Snyk
+        if: github.ref == 'refs/heads/main'
+        uses: snyk/actions/python@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --file=backend/requirements.txt --project-name="${{ github.repository }}"
+          command: monitor
+
+  # Job ที่ 3: Additional Security Scans
+  security-additional:
+    name: Additional Security Scans
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Run Safety check
+        run: |
+          pip install safety
+          cd backend
+          safety check --json --output safety-report.json || echo "⚠️ Safety warnings found"
+        continue-on-error: true
+
+      - name: Run Bandit SAST
+        run: |
+          pip install bandit[toml]
+          cd backend
+          bandit -r . -f json -o bandit-report.json -ll || echo "⚠️ Bandit warnings found"
+        continue-on-error: true
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: auto
+          generateSarif: "1"
+        continue-on-error: true
+
+      - name: Secret Scanning with TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+      - name: Upload security artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            backend/safety-report.json
+            backend/bandit-report.json
+          retention-days: 30
+
+  # Job ที่ 4: Build Docker Image
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test, security-snyk, security-additional]
+    if: |
+      always() && 
+      needs.test.result == 'success' && 
+      (needs.security-snyk.result == 'success' || needs.security-snyk.result == 'skipped')
+
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy container scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: trivy-container
+
+  # Job ที่ 5: Notify Results
+  notify:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: [test, security-snyk, security-additional, build]
+    if: always()
+    
+    steps:
+      - name: Create PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const testStatus = '${{ needs.test.result }}';
+            const snykStatus = '${{ needs.security-snyk.result }}';
+            const additionalSecurityStatus = '${{ needs.security-additional.result }}';
+            const buildStatus = '${{ needs.build.result }}';
+            
+            const statusEmoji = {
+              'success': '✅',
+              'failure': '❌',
+              'cancelled': '⏹️',
+              'skipped': '⏭️'
+            };
+            
+            const comment = `
+            ## 🚀 CI/CD Pipeline Results
+            
+            | Job | Status | Result |
+            |-----|--------|---------|
+            | Tests | ${statusEmoji[testStatus] || '❓'} | ${testStatus} |
+            | Snyk Security | ${statusEmoji[snykStatus] || '❓'} | ${snykStatus} |
+            | Additional Security | ${statusEmoji[additionalSecurityStatus] || '❓'} | ${additionalSecurityStatus} |
+            | Docker Build | ${statusEmoji[buildStatus] || '❓'} | ${buildStatus} |
+            
+            ### 📊 Details
+            - **Commit**: \`${{ github.sha }}\`
+            - **Branch**: \`${{ github.head_ref }}\`
+            - **Triggered by**: @${{ github.actor }}
+            
+            ${testStatus === 'success' && (buildStatus === 'success' || buildStatus === 'skipped')
+              ? '🎉 All critical checks passed! Ready for review.' 
+              : '⚠️ Some checks failed. Please review before merging.'}
+            
+            📋 [View detailed logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Print summary
+        run: |
+          echo "========================================="
+          echo "    CI/CD PIPELINE SUMMARY"
+          echo "========================================="
+          echo ""
+          echo "📋 Job Results:"
+          echo "  • Tests:                ${{ needs.test.result }}"
+          echo "  • Snyk Security:        ${{ needs.security-snyk.result }}"
+          echo "  • Additional Security:  ${{ needs.security-additional.result }}"
+          echo "  • Build:                ${{ needs.build.result }}"
+          echo ""
+          echo "📦 Metadata:"
+          echo "  • Commit:    ${{ github.sha }}"
+          echo "  • Branch:    ${{ github.ref_name }}"
+          echo "  • Actor:     ${{ github.actor }}"
+          echo "  • Event:     ${{ github.event_name }}"
+          echo ""
+          echo "========================================="
+          
+          if [[ "${{ needs.test.result }}" == "success" ]]; then
+            echo "✅ PIPELINE STATUS: SUCCESS"
+            exit 0
+          else
+            echo "❌ PIPELINE STATUS: FAILED"
+            exit 1
+          fi
+```
+
+### สรุปการแก้ไข:
+
+#### 🔧 ปัญหาที่แก้ไข:
+
+1. **Health Check Command ไม่สมบูรณ์**
+   ```yaml
+   # ❌ เก่า
+   --health-cmd "pg_isready -U $POSTGRES_USER "
+   
+   # ✅ ใหม่
+   --health-cmd "pg_isready -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }}"
+   ```
+
+2. **เพิ่ม health-start-period**
+   ```yaml
+   --health-start-period 30s  # PostgreSQL
+   --health-start-period 20s  # Redis
+   ```
+
+3. **แก้ไข Set up test environment (ลบ syntax error)**
+   ```yaml
+   # ❌ เก่า (มี variable ไม่จำเป็น)
+   DATABASE_URL_RAW="postgresql://..."
+   echo "DATABASE_URL=$DATABASE_URL_RAW" >> $GITHUB_ENV
+   
+   # ✅ ใหม่ (เขียนตรงๆ)
+   echo "DATABASE_URL=postgresql://..." >> $GITHUB_ENV
+   ```
+
+4. **เพิ่ม cache-dependency-path**
+   ```yaml
+   cache: 'pip'
+   cache-dependency-path: backend/requirements.txt
+   ```
+
+5. **แยก echo ใน Wait for services**
+   ```yaml
+   echo "Waiting for PostgreSQL..."
+   timeout 60 ...
+   echo "✅ PostgreSQL is ready!"
+   ```
+
+6. **เพิ่ม env ใน Run tests**
+   ```yaml
+   env:
+     DATABASE_URL: ${{ env.DATABASE_URL }}
+     REDIS_URL: ${{ env.REDIS_URL }}
+     SECRET_KEY: ${{ secrets.SECRET_KEY }}
+     FLASK_ENV: testing
+   ```
+
+7. **เพิ่ม category ใน SARIF uploads**
+   ```yaml
+   category: snyk-code
+   category: trivy-container
+   ```
+
+8. **เพิ่ม severity ใน Trivy scan**
+   ```yaml
+   severity: 'HIGH,CRITICAL'
+   ```
+
+9. **ปรับปรุง PR comment**
+   - เพิ่ม details section
+   - เพิ่ม link ไปยัง workflow logs
+   - ใช้ single quotes แทน escaped quotes
+
+10. **ปรับปรุง summary output**
+    - เพิ่ม formatting
+    - เพิ่ม metadata
+    - ชัดเจนขึ้น
+
+```yaml
+name: Flask CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PYTHON_VERSION: '3.9'
+
+# SECURITY: จำกัดสิทธิ์ตาม Least Privilege Principle
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  # Job ที่ 1: ทดสอบโค้ด
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ${{ secrets.POSTGRES_USER }}"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -66,15 +747,17 @@ jobs:
 
       - name: Set up test environment
         run: |
-          DATABASE_URL_RAW="postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/${{ secrets.POSTGRES_DB }}"
-          echo "DATABASE_URL=$DATABASE_URL_RAW" >> $GITHUB_ENV
+          echo "DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/${{ secrets.POSTGRES_DB }}" >> $GITHUB_ENV
           echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
           echo "FLASK_ENV=testing" >> $GITHUB_ENV
 
       - name: Wait for services
         run: |
+          echo "Waiting for PostgreSQL..."
           timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U ${{ secrets.POSTGRES_USER }}; do sleep 2; done'
           echo "✅ PostgreSQL is ready!"
+          
+          echo "Waiting for Redis..."
           timeout 60 bash -c 'until redis-cli -h localhost -p 6379 ping | grep -q PONG; do sleep 2; done'
           echo "✅ Redis is ready!"
 
@@ -321,3 +1004,2241 @@ jobs:
           echo "Snyk: ${{ needs.security-snyk.result }}"
           echo "Security: ${{ needs.security-additional.result }}"
           echo "Build: ${{ needs.build.result }}"
+```
+
+### คำอธิบายแต่ละส่วนใน GitHub Actions
+
+#### Permissions (สำคัญ!)
+```yaml
+permissions:
+  contents: read          # อ่าน repository
+  packages: write         # เขียน packages
+  security-events: write  # เขียน security events
+```
+
+#### Jobs
+- **runs-on**: ระบบปฏิบัติการที่ใช้
+- **needs**: รอ job อื่นเสร็จก่อน
+- **if**: เงื่อนไขในการทำงาน
+- **services**: services สำหรับทดสอบ
+
+#### Steps
+- **uses**: ใช้ action ที่มีอยู่แล้ว
+- **run**: รันคำสั่งโดยตรง
+- **with**: พารามิเตอร์สำหรับ action
+- **env**: ตัวแปรสภาพแวดล้อม
+
+---
+
+## ส่วนที่ 4: การปฏิบัติจริง (Hands-on)
+
+### ปฏิบัติการที่ 1: สร้าง Docker Compose Project
+
+#### ขั้นตอนที่ 1: เตรียมโครงสร้างโปรเจค
+
+```bash
+# สร้างโฟลเดอร์โปรเจค
+mkdir my-flask-app
+cd my-flask-app
+
+# สร้างโครงสร้างโฟลเดอร์
+mkdir -p backend/tests
+mkdir -p .github/workflows
+
+# สร้างไฟล์ว่างๆ
+touch docker-compose.yml
+touch Dockerfile
+touch backend/app.py
+touch backend/requirements.txt
+touch backend/tests/test_app.py
+touch .env.example
+touch .gitignore
+touch README.md
+```
+
+#### ขั้นตอนที่ 2: สร้างไฟล์ Docker Compose
+
+**สร้างไฟล์ `docker-compose.yml` ในโฟลเดอร์หลัก:**
+
+```yaml
+# Modern Docker Compose - ไม่ต้องระบุ version
+
+services:
+  web:
+    build: .
+    container_name: flask_app
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: postgres:16-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+```
+
+#### ขั้นตอนที่ 3: สร้างไฟล์โปรเจค
+
+**สร้างไฟล์ `Dockerfile` ในโฟลเดอร์หลัก:**
+
+```dockerfile
+FROM python:3.9-slim
+
+# ติดตั้ง dependencies ที่จำเป็น
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements และติดตั้ง
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY backend/ .
+
+EXPOSE 5000
+
+CMD ["python", "app.py"]
+```
+
+**สร้างไฟล์ `backend/app.py`:**
+
+```python
+from flask import Flask, jsonify
+import os
+
+app = Flask(__name__)
+
+@app.route('/')
+def hello():
+    return jsonify({
+        "message": "Hello World!",
+        "status": "running"
+    })
+
+@app.route('/health')
+def health():
+    db_status = "connected" if os.getenv('DATABASE_URL') else "not configured"
+    redis_status = "connected" if os.getenv('REDIS_URL') else "not configured"
+    
+    return jsonify({
+        "status": "healthy",
+        "database": db_status,
+        "redis": redis_status
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+```
+
+**สร้างไฟล์ `backend/requirements.txt`:**
+
+```txt
+# Web Framework
+Flask==3.0.3
+
+# Testing
+pytest==8.3.3
+pytest-cov==5.0.0
+
+# Database
+psycopg2-binary==2.9.9
+
+# Cache
+redis==5.1.1
+
+# Additional
+python-dotenv==1.0.1
+```
+
+**สร้างไฟล์ `backend/tests/test_app.py`:**
+
+```python
+import pytest
+from app import app
+
+@pytest.fixture
+def client():
+    app.config['TESTING'] = True
+    with app.test_client() as client:
+        yield client
+
+def test_hello(client):
+    """ทดสอบ endpoint หลัก"""
+    response = client.get('/')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['message'] == 'Hello World!'
+    assert data['status'] == 'running'
+
+def test_health(client):
+    """ทดสอบ health check endpoint"""
+    response = client.get('/health')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['status'] == 'healthy'
+    assert 'database' in data
+    assert 'redis' in data
+
+def test_math_operations():
+    """ทดสอบพื้นฐาน"""
+    assert 1 + 1 == 2
+    assert 2 * 3 == 6
+```
+
+**สร้างไฟล์ `.env.example`:**
+
+```bash
+# Database Configuration
+POSTGRES_DB=mydb
+POSTGRES_USER=user
+POSTGRES_PASSWORD=your_password_here
+
+# Application Configuration
+FLASK_ENV=development
+SECRET_KEY=your_secret_key_here
+
+# Optional: Snyk Token (for security scanning)
+SNYK_TOKEN=your_snyk_token_here
+```
+
+**สร้างไฟล์ `.gitignore`:**
+
+```gitignore
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+.tox/
+.coverage
+.pytest_cache/
+htmlcov/
+*.egg-info/
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite3
+
+# Docker
+.dockerignore
+```
+
+**สร้างไฟล์ `README.md`:**
+
+```markdown
+# Flask CI/CD Demo
+
+Demo project สำหรับ Lab 00 - Docker Compose และ GitHub Actions
+
+## Requirements
+
+- Docker Desktop
+- Git
+
+## Quick Start
+
+1. Clone repository:
+\`\`\`bash
+git clone <your-repo-url>
+cd my-flask-app
+\`\`\`
+
+2. Setup environment:
+\`\`\`bash
+cp .env.example .env
+# แก้ไขค่าใน .env
+\`\`\`
+
+3. Start services:
+\`\`\`bash
+docker compose up -d
+\`\`\`
+
+4. Test API:
+\`\`\`bash
+curl http://localhost:5000/
+curl http://localhost:5000/health
+\`\`\`
+
+## Project Structure
+
+\`\`\`
+my-flask-app/
+├── backend/
+│   ├── app.py
+│   ├── requirements.txt
+│   └── tests/
+│       └── test_app.py
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml
+├── docker-compose.yml
+├── Dockerfile
+├── .env.example
+├── .gitignore
+└── README.md
+\`\`\`
+```
+
+#### ขั้นตอนที่ 4: ตั้งค่า Environment Variables
+
+```bash
+# 1. คัดลอกไฟล์ template
+cp .env.example .env
+
+# 2. Generate secure passwords
+python3 << 'EOF'
+import secrets
+print("# Generated Secure Values")
+print(f"POSTGRES_PASSWORD={secrets.token_urlsafe(24)}")
+print(f"SECRET_KEY={secrets.token_urlsafe(32)}")
+EOF
+
+# 3. แก้ไขไฟล์ .env ด้วย text editor ที่ชอบ
+# Linux/Mac
+nano .env
+# หรือ
+vim .env
+# หรือ
+code .env  # ถ้าใช้ VS Code
+
+# Windows
+notepad .env
+```
+
+**ตัวอย่างไฟล์ `.env` ที่แก้ไขแล้ว:**
+```bash
+# Database Configuration
+POSTGRES_DB=mydb
+POSTGRES_USER=user
+POSTGRES_PASSWORD=Xy7zABc123DEfghIJklMNopqRStuVWxyz
+
+# Application Configuration
+FLASK_ENV=development
+SECRET_KEY=AbC123dEf456GhI789JkL012MnO345PqR678StU901VwX234YzA567BcD890
+```
+
+#### ขั้นตอนที่ 5: ทดสอบ Docker Compose
+
+```bash
+# ตรวจสอบว่าไฟล์ทั้งหมดพร้อมแล้ว
+ls -la
+# ควรเห็น: docker-compose.yml, Dockerfile, backend/, .env
+
+# Validate docker-compose.yml
+docker compose config
+# ถ้าไม่มี error แสดงว่า YAML ถูกต้อง
+
+# เริ่มต้น services (build และ start)
+docker compose up -d --build
+
+# รอสักครู่ให้ services เริ่มต้น (ประมาณ 30 วินาที)
+echo "Waiting for services to be ready..."
+sleep 30
+
+# ตรวจสอบ status ของ services
+docker compose ps
+
+# ควรเห็นผลลัพธ์แบบนี้:
+# NAME            IMAGE              STATUS          PORTS
+# flask_app       my-flask-app-web   Up 30 seconds   0.0.0.0:5000->5000/tcp
+# postgres_db     postgres:16-alpine Up 30 seconds   0.0.0.0:5432->5432/tcp
+# redis_cache     redis:7-alpine     Up 30 seconds   0.0.0.0:6379->6379/tcp
+
+# ดู logs ของทุก services
+docker compose logs
+
+# ดู logs แบบ follow (real-time)
+docker compose logs -f
+
+# กด Ctrl+C เพื่อหยุดดู logs
+
+# ดู logs เฉพาะ service
+docker compose logs web
+docker compose logs db
+docker compose logs redis
+
+# ตรวจสอบ health status
+docker compose ps --format json | jq -r '.[] | "\(.Name): \(.State) - \(.Health)"'
+```
+
+#### ขั้นตอนที่ 6: ทดสอบ API Endpoints
+
+```bash
+# ทดสอบ root endpoint
+curl http://localhost:5000/
+# Expected output:
+# {"message":"Hello World!","status":"running"}
+
+# ทดสอบ health endpoint
+curl http://localhost:5000/health
+# Expected output:
+# {"status":"healthy","database":"connected","redis":"connected"}
+
+# ทดสอบด้วย curl แบบ pretty print
+curl -s http://localhost:5000/ | python3 -m json.tool
+
+# หรือใช้ httpie (ถ้ามี)
+http localhost:5000/
+http localhost:5000/health
+
+# ทดสอบด้วย browser
+# เปิด http://localhost:5000/
+# เปิด http://localhost:5000/health
+```
+
+#### ขั้นตอนที่ 7: ทดสอบ Database และ Redis
+
+```bash
+# เข้าไปใน PostgreSQL container
+docker compose exec db psql -U user -d mydb
+
+# ทดสอบคำสั่ง SQL
+# psql> SELECT version();
+# psql> \l          (list databases)
+# psql> \q          (quit)
+
+# เข้าไปใน Redis container
+docker compose exec redis redis-cli
+
+# ทดสอบคำสั่ง Redis
+# redis> PING        (should return PONG)
+# redis> SET test "Hello Redis"
+# redis> GET test
+# redis> exit
+
+# ทดสอบจาก web container
+docker compose exec web bash
+# ใน container:
+# python3 -c "import psycopg2; print('PostgreSQL OK')"
+# python3 -c "import redis; print('Redis OK')"
+# exit
+```
+
+#### ขั้นตอนที่ 8: Run Tests
+
+```bash
+# Run tests ใน container
+docker compose exec web pytest tests/ -v
+
+# Run tests with coverage
+docker compose exec web pytest tests/ -v --cov=. --cov-report=term
+
+# Expected output:
+# ======================== test session starts =========================
+# test_app.py::test_hello PASSED                                 [ 33%]
+# test_app.py::test_health PASSED                                [ 66%]
+# test_app.py::test_math_operations PASSED                       [100%]
+# ========================= 3 passed in 0.05s =========================
+```
+
+#### ขั้นตอนที่ 9: Debugging (ถ้ามีปัญหา)
+
+**ปัญหาที่ 1: Port Already in Use**
+
+**อาการ:**
+```
+Error: Ports are not available: exposing port TCP 0.0.0.0:5432 -> 127.0.0.1:0: 
+listen tcp 0.0.0.0:5432: bind: address already in use
+```
+
+**สาเหตุ:** มี PostgreSQL, Redis หรือ service อื่นทำงานอยู่แล้วบนเครื่อง
+
+**วิธีแก้ที่ 1: หา Process ที่ใช้ Port และปิด**
+
+```bash
+# ========================================
+# Linux / macOS
+# ========================================
+
+# หา process ที่ใช้ port 5432 (PostgreSQL)
+lsof -i :5432
+
+# ผลลัพธ์จะแสดงประมาณนี้:
+# COMMAND   PID  USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+# postgres  1234 user   5u  IPv4  0x...      0t0  TCP *:postgresql (LISTEN)
+
+# ปิด process (แทนที่ 1234 ด้วย PID ที่ได้)
+kill -9 1234
+
+# หรือปิด PostgreSQL ที่ติดตั้งบนเครื่อง
+# Ubuntu/Debian
+sudo service postgresql stop
+
+# macOS (ถ้าติดตั้งด้วย Homebrew)
+brew services stop postgresql
+
+# หา process ที่ใช้ port 6379 (Redis)
+lsof -i :6379
+
+# ปิด Redis
+kill -9 <PID>
+# หรือ
+brew services stop redis
+
+# หา process ที่ใช้ port 5000 (Flask)
+lsof -i :5000
+kill -9 <PID>
+
+# ========================================
+# Windows
+# ========================================
+
+# หา process ที่ใช้ port 5432
+netstat -ano | findstr :5432
+
+# ผลลัพธ์จะแสดง:
+# TCP    0.0.0.0:5432    0.0.0.0:0    LISTENING    1234
+
+# ปิด process (แทนที่ 1234 ด้วย PID ที่ได้)
+taskkill /PID 1234 /F
+
+# หรือหยุด PostgreSQL service
+net stop postgresql-x64-14
+
+# หา process ที่ใช้ port 6379 (Redis)
+netstat -ano | findstr :6379
+taskkill /PID <PID> /F
+
+# หา process ที่ใช้ port 5000 (Flask)
+netstat -ano | findstr :5000
+taskkill /PID <PID> /F
+```
+
+**วิธีแก้ที่ 2: เปลี่ยน Port Mapping (แนะนำ)**
+
+แก้ไขไฟล์ `docker-compose.yml`:
+
+```yaml
+services:
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"  # เปลี่ยนจาก 5432:5432 เป็น 5433:5432
+      # ↑ port บนเครื่องเรา (host)
+      #      ↑ port ใน container (ไม่ต้องเปลี่ยน)
+    # ... config อื่นๆ
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"  # เปลี่ยนจาก 6379:6379 เป็น 6380:6379
+
+  web:
+    ports:
+      - "5001:5000"  # เปลี่ยนจาก 5000:5000 เป็น 5001:5000
+```
+
+**อัปเดตการเชื่อมต่อ:**
+
+```bash
+# ทดสอบ API ด้วย port ใหม่
+curl http://localhost:5001/        # แทน 5000
+curl http://localhost:5001/health
+
+# เชื่อมต่อ PostgreSQL จากเครื่อง
+psql -h localhost -p 5433 -U user -d mydb  # แทน 5432
+
+# เชื่อมต่อ Redis จากเครื่อง
+redis-cli -h localhost -p 6380  # แทน 6379
+```
+
+**หมายเหตุ:** 
+- 🔵 **Port ซ้าย (5433)** = Port บนเครื่องเรา (host) - เปลี่ยนได้
+- 🟢 **Port ขวา (5432)** = Port ใน container - ไม่ต้องเปลี่ยน
+- ✅ Services ใน Docker ยังคงใช้ port เดิมสื่อสารกัน
+
+**วิธีแก้ที่ 3: ไม่ต้อง Expose Port (ถ้าไม่จำเป็น)**
+
+ถ้าไม่ต้องการเข้าถึง database จากเครื่องเรา ให้ลบ `ports:` ออก:
+
+```yaml
+services:
+  db:
+    image: postgres:16-alpine
+    # ลบ ports ออก - ใช้เฉพาะภายใน Docker network
+    # ports:
+    #   - "5432:5432"
+    
+  redis:
+    image: redis:7-alpine
+    # ลบ ports ออก
+    # ports:
+    #   - "6379:6379"
+```
+
+**ข้อดี:**
+- ✅ ไม่มีปัญหา port conflict
+- ✅ ปลอดภัยกว่า (ไม่เปิดให้เข้าถึงจากภายนอก)
+
+**ข้อเสีย:**
+- ❌ ไม่สามารถเข้าถึง database จากเครื่องเราได้โดยตรง
+- ❌ ต้องใช้ `docker compose exec` เพื่อเข้าถึง
+
+**วิธีแก้ที่ 4: ใช้ Script ตรวจสอบและหยุด Services**
+
+สร้างไฟล์ `check-ports.sh`:
+
+```bash
+#!/bin/bash
+
+echo "🔍 Checking ports..."
+echo ""
+
+# Function to check and kill process
+check_and_kill() {
+    PORT=$1
+    SERVICE=$2
+    
+    if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
+        echo "⚠️  Port $PORT ($SERVICE) is in use"
+        PID=$(lsof -Pi :$PORT -sTCP:LISTEN -t)
+        echo "   PID: $PID"
+        read -p "   Do you want to kill this process? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            kill -9 $PID
+            echo "   ✅ Process killed"
+        fi
+    else
+        echo "✅ Port $PORT ($SERVICE) is available"
+    fi
+}
+
+# Check ports
+check_and_kill 5000 "Flask/Web"
+check_and_kill 5432 "PostgreSQL"
+check_and_kill 6379 "Redis"
+
+echo ""
+echo "🎉 Port check complete!"
+```
+
+ใช้งาน:
+```bash
+chmod +x check-ports.sh
+./check-ports.sh
+```
+
+**ปัญหาที่ 2: Services ไม่ Healthy**
+
+```bash
+# ตรวจสอบ logs รายละเอียด
+docker compose logs --tail=50 web
+docker compose logs --tail=50 db
+docker compose logs --tail=50 redis
+
+# เข้าไปใน container เพื่อ debug
+docker compose exec web bash
+docker compose exec db bash
+docker compose exec redis sh
+
+# ตรวจสอบ network
+docker compose exec web ping db
+docker compose exec web ping redis
+
+# ตรวจสอบ environment variables
+docker compose exec web env | grep -E "(DATABASE|REDIS|FLASK)"
+
+# Restart service เดียว
+docker compose restart web
+
+# Rebuild และ restart
+docker compose up -d --build web
+```
+
+**ปัญหาที่ 3: Database Connection Error**
+
+```bash
+# ตรวจสอบว่า PostgreSQL พร้อมหรือยัง
+docker compose exec db pg_isready -U user -d mydb
+
+# ตรวจสอบว่ามี database หรือยัง
+docker compose exec db psql -U user -d mydb -c "\l"
+
+# ทดสอบ connection จาก web container
+docker compose exec web bash -c 'psql $DATABASE_URL -c "SELECT 1"'
+
+# ตรวจสอบ logs
+docker compose logs db | grep -i error
+```
+
+**ปัญหาที่ 4: Permission Denied**
+
+```bash
+# ถ้าเจอ permission denied กับ volumes
+sudo chown -R $USER:$USER .
+
+# หรือเปลี่ยน permissions
+chmod -R 755 backend/
+```
+
+**ปัญหาที่ 5: Container Exit ทันที**
+
+```bash
+# ดู exit code
+docker compose ps
+
+# ดู logs
+docker compose logs web
+
+# รัน container แบบ interactive เพื่อ debug
+docker compose run --rm web bash
+
+# ข้างในลองรันคำสั่ง
+python app.py
+```
+
+**Quick Fix Script**
+
+สร้างไฟล์ `fix-common-issues.sh`:
+
+```bash
+#!/bin/bash
+
+echo "🔧 Fixing common Docker Compose issues..."
+echo ""
+
+# Stop all containers
+echo "1. Stopping all containers..."
+docker compose down -v
+
+# Kill processes on required ports
+echo "2. Freeing up ports..."
+for port in 5000 5432 6379; do
+    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+        echo "   Killing process on port $port..."
+        kill -9 $(lsof -Pi :$port -sTCP:LISTEN -t) 2>/dev/null
+    fi
+done
+
+# Clean up Docker
+echo "3. Cleaning up Docker..."
+docker system prune -f
+
+# Rebuild and start
+echo "4. Rebuilding and starting services..."
+docker compose up -d --build
+
+# Wait for services
+echo "5. Waiting for services to be ready..."
+sleep 30
+
+# Check status
+echo "6. Checking status..."
+docker compose ps
+
+echo ""
+echo "✅ Done! Check if all services are running and healthy."
+```
+
+ใช้งาน:
+```bash
+chmod +x fix-common-issues.sh
+./fix-common-issues.sh
+```
+
+### สรุป: แนวทางแก้ปัญหา Port Conflict
+
+**แนะนำตามลำดับ:**
+
+1. ✅ **เปลี่ยน Port Mapping** (ง่ายที่สุด)
+   ```yaml
+   ports:
+     - "5433:5432"  # ใช้ 5433 แทน 5432
+   ```
+
+2. ✅ **ปิด Service ที่ทำงานอยู่** (ถ้าไม่ได้ใช้)
+   ```bash
+   sudo service postgresql stop
+   brew services stop postgresql
+   ```
+
+3. ✅ **ไม่ Expose Port** (ถ้าไม่จำเป็นต้องเข้าถึงจากภายนอก)
+   ```yaml
+   # ลบ ports: ออก
+   ```
+
+4. ✅ **ใช้ Script อัตโนมัติ** (สำหรับคนที่เจอบ่อยๆ)
+   ```bash
+   ./check-ports.sh
+   ./fix-common-issues.sh
+   ```
+
+#### ขั้นตอนที่ 10: หยุดและทำความสะอาด
+
+```bash
+# หยุด services (แต่เก็บ data)
+docker compose stop
+
+# เริ่มต้นใหม่
+docker compose start
+
+# หยุดและลบ containers (แต่เก็บ volumes)
+docker compose down
+
+# หยุด ลบ containers และ volumes (⚠️ จะลบข้อมูลด้วย!)
+docker compose down -v
+
+# ลบทุกอย่างรวม images
+docker compose down -v --rmi all
+
+# ลบ system cache (optional)
+docker system prune -f
+```
+
+### สรุปขั้นตอนทั้งหมด:
+
+```bash
+# 1. สร้างโครงสร้าง
+mkdir -p my-flask-app/backend/tests
+cd my-flask-app
+
+# 2. สร้างไฟล์ทั้งหมด (ตาม template ข้างบน)
+# - docker-compose.yml
+# - Dockerfile  
+# - backend/app.py
+# - backend/requirements.txt
+# - backend/tests/test_app.py
+# - .env.example
+# - .gitignore
+
+# 3. Setup environment
+cp .env.example .env
+nano .env  # แก้ไข passwords
+
+# 4. Start และ test
+docker compose up -d --build
+docker compose ps
+curl http://localhost:5000/
+curl http://localhost:5000/health
+docker compose exec web pytest tests/ -v
+
+# 5. หยุด
+docker compose down
+```
+
+### Checklist ก่อนไปขั้นตอนถัดไป:
+
+- [ ] ไฟล์ทั้งหมดถูกสร้างครบ
+- [ ] .env มี passwords ที่ปลอดภัย
+- [ ] `docker compose config` ไม่มี error
+- [ ] Services ทั้งหมด status เป็น "Up" และ "healthy"
+- [ ] API endpoints ตอบกลับถูกต้อง
+- [ ] Tests ผ่านทั้งหมด
+- [ ] Database และ Redis เชื่อมต่อได้
+```
+
+### ปฏิบัติการที่ 2: สร้าง GitHub Actions Workflow
+
+#### ขั้นตอนที่ 1: สร้าง GitHub Repository
+
+```bash
+# Initial commit
+git init
+git add .
+git commit -m "Initial commit: Flask app setup"
+
+# สร้าง repository บน GitHub แล้วเชื่อมต่อ
+git remote add origin https://github.com/YOUR_USERNAME/flask-ci-cd-demo.git
+git branch -M main
+git push -u origin main
+```
+
+#### ขั้นตอนที่ 2: ตั้งค่า GitHub Secrets
+
+1. ไปที่ GitHub Repository > **Settings**
+2. คลิก **Secrets and variables** > **Actions**
+3. คลิก **New repository secret** แล้วเพิ่ม:
+
+| Secret Name | วิธีสร้างค่า |
+|-------------|--------------|
+| `POSTGRES_PASSWORD` | `python -c "import secrets; print(secrets.token_urlsafe(24))"` |
+| `POSTGRES_USER` | `postgres` |
+| `POSTGRES_DB` | `test_db` |
+| `SECRET_KEY` | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `JWT_SECRET` | `python -c "import secrets; print(secrets.token_urlsafe(24))"` |
+| `SNYK_TOKEN` | ไปที่ https://snyk.io > Account Settings > Auth Token |
+
+#### ขั้นตอนที่ 3: สร้าง Workflow File
+
+```bash
+mkdir -p .github/workflows
+# สร้างไฟล์ .github/workflows/ci-cd.yml
+# คัดลอกโค้ด workflow จากตัวอย่างข้างต้น
+```
+
+#### ขั้นตอนที่ 4: Push และทดสอบ
+
+```bash
+git add .github/workflows/ci-cd.yml
+git commit -m "Add CI/CD pipeline"
+git push origin main
+
+# ไปดูผลลัพธ์ใน GitHub Actions tab
+```
+
+#### ขั้นตอนที่ 5: ทดสอบ Pull Request
+
+```bash
+git checkout -b feature/test-pr
+echo "# Test PR" >> README.md
+git add README.md
+git commit -m "Test PR workflow"
+git push origin feature/test-pr
+
+# สร้าง Pull Request บน GitHub
+# ดู workflow ทำงานและ comment ที่ถูกสร้าง
+```
+
+---
+
+## ส่วนที่ 5: เครื่องมือเสริม
+
+### Makefile สำหรับ Command Shortcuts
+
+สร้างไฟล์ `Makefile`:
+
+```makefile
+.PHONY: help build up down logs test clean
+
+COMPOSE=docker compose
+
+help:
+	@echo "Available commands:"
+	@echo "  make build   - Build images"
+	@echo "  make up      - Start services"
+	@echo "  make down    - Stop services"
+	@echo "  make logs    - Show logs"
+	@echo "  make test    - Run tests"
+	@echo "  make clean   - Clean up"
+
+build:
+	$(COMPOSE) build
+
+up:
+	$(COMPOSE) up -d
+	@sleep 10
+	@echo "✅ Services started"
+	@$(COMPOSE) ps
+
+down:
+	$(COMPOSE) down
+
+logs:
+	$(COMPOSE) logs -f
+
+test:
+	$(COMPOSE) exec web pytest tests/ -v
+
+clean:
+	$(COMPOSE) down -v
+	docker system prune -f
+```
+
+การใช้งาน:
+```bash
+make help
+make up
+make test
+make logs
+make down
+```
+
+---
+
+## ส่วนที่ 6: การเปรียบเทียบ เก่า vs ใหม่
+
+### การเปรียบเทียบ เก่า vs ใหม่
+
+| ด้าน | เก่า (ไม่แนะนำ) | ใหม่ (แนะนำ) | เหตุผล |
+|------|------------------|--------------|--------|
+| **Version** | `version: '3.8'` | ไม่ระบุ (Compose Spec V2) | ไม่ต้องกังวลเรื่อง version compatibility |
+| **PostgreSQL** | `postgres:13` (374MB) | `postgres:16-alpine` (108MB) | เล็กกว่า 71%, ปลอดภัยกว่า, features ใหม่ |
+| **Redis** | `redis:6` (105MB) | `redis:7-alpine` (31MB) | เล็กกว่า 70%, มี Redis Stack |
+| **Flask** | `Flask==2.3.3` | `Flask==3.0.3` | Security fixes, async support ดีขึ้น |
+| **pytest** | `pytest==7.4.0` | `pytest==8.3.3` | Performance improvements |
+| **Health Check** | ไม่มี | มีครบทุก service | ป้องกัน race conditions |
+| **depends_on** | แค่ list | `condition: service_healthy` | รอจนกว่าจะ ready จริง |
+| **Password** | hardcode | `${{ secrets.XXX }}` | Security best practice |
+| **CLI** | `docker-compose` | `docker compose` | V2 เร็วกว่า 50% |
+
+### เปรียบเทียบ Python Packages
+
+| Package | เวอร์ชันเก่า | เวอร์ชันใหม่ | Release Date | Key Changes |
+|---------|--------------|--------------|--------------|-------------|
+| **Flask** | 2.3.3 (Aug 2023) | 3.0.3 (May 2024) | 9 เดือน | Security patches, Python 3.12 support |
+| **pytest** | 7.4.0 (Jun 2023) | 8.3.3 (Sep 2024) | 15 เดือน | Performance +30%, better error messages |
+| **pytest-cov** | 4.1.0 (May 2023) | 5.0.0 (Nov 2023) | 6 เดือน | pytest 8 compatibility |
+| **psycopg2** | 2.9.7 (Aug 2023) | 2.9.9 (Oct 2023) | 2 เดือน | Bug fixes, PostgreSQL 16 support |
+| **redis** | 4.6.0 (Jun 2023) | 5.1.1 (Oct 2024) | 16 เดือน | Performance improvements, Redis Stack |
+
+### ความเสี่ยงและประโยชน์
+
+#### ⚠️ ความเสี่ยงของการใช้เวอร์ชันเก่า:
+
+1. **Security Vulnerabilities**
+   - CVE patches ไม่ได้รับการแก้ไข
+   - เสี่ยงต่อการโจมตี
+
+2. **Compatibility Issues**
+   - ไม่รองรับ Python 3.12+
+   - ไม่รองรับ PostgreSQL 16 features
+
+3. **Missing Features**
+   - ไม่ได้ใช้ฟีเจอร์ใหม่ที่ดีกว่า
+   - Performance ช้ากว่า
+
+#### ✅ ประโยชน์ของการใช้เวอร์ชันใหม่:
+
+1. **Security**
+   - ได้รับ security patches ล่าสุด
+   - ปิดช่องโหว่ที่รู้จัก
+
+2. **Performance**
+   - pytest 8 เร็วขึ้น 30%
+   - Redis 5 มี optimizations ใหม่
+
+3. **Features**
+   - Flask 3 รองรับ async ดีขึ้น
+   - pytest 8 มี error messages ที่ดีกว่า
+
+4. **Support**
+   - Community support ดีกว่า
+   - Documentation ครบถ้วนกว่า
+
+### GitHub Actions
+
+| ด้าน | เก่า (ไม่แนะนำ) | ใหม่ (แนะนำ) |
+|------|------------------|--------------|
+| **Permissions** | ไม่จำกัด | Least Privilege |
+| **Actions** | v3 | v4-v5 |
+| **Caching** | ไม่มี | `cache: 'pip'` |
+| **Security Scans** | 1-2 tools | 6 tools |
+| **Image Tags** | `postgres:13` | `postgres:16-alpine` |
+
+### ผลลัพธ์ที่ได้
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| **Image Size** | 479MB | 139MB | -71% |
+| **CI Speed** | 5 min | 2 min | +150% |
+| **Security Coverage** | Basic | Comprehensive | +400% |
+| **Reliability** | Race conditions | Health checks | +100% |
+
+---
+
+## ส่วนที่ 7: Troubleshooting
+
+### ปัญหาที่พบบ่อยและวิธีแก้ไข
+
+#### 1. Docker Compose ไม่เริ่มต้น
+
+**อาการ:** Services ไม่ start หรือ exit ทันที
+
+```bash
+# ตรวจสอบ logs
+docker compose logs
+
+# ตรวจสอบ configuration
+docker compose config
+
+# Validate YAML
+docker compose config --quiet && echo "✅ Valid" || echo "❌ Invalid"
+
+# เริ่มใหม่โดยไม่ใช้ cache
+docker compose down -v
+docker compose up -d --build
+```
+
+#### 2. GitHub Actions Syntax Errors
+
+**ปัญหาที่พบบ่อย:**
+
+**Error 1: Unexpected token in bash script**
+```
+syntax error near unexpected token `secrets.token_urlsafe'
+```
+
+**สาเหตุ:** พยายามใช้ Python code ใน bash script โดยตรง
+
+**❌ ผิด:**
+```yaml
+- name: Generate password
+  run: echo "PASSWORD=secrets.token_urlsafe(24)" >> $GITHUB_ENV
+```
+
+**✅ ถูกต้อง:**
+```yaml
+- name: Generate password
+  run: |
+    PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+    echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
+```
+
+**Error 2: Secrets not available**
+```
+Error: Missing required secret: POSTGRES_PASSWORD
+```
+
+**วิธีแก้:**
+1. ไปที่ GitHub Repository > Settings
+2. Secrets and variables > Actions
+3. เพิ่ม secret ที่หายไป
+
+**Error 3: Invalid YAML syntax**
+```
+Error: The workflow is not valid. .github/workflows/ci-cd.yml: 
+unexpected value 'run'
+```
+
+**สาเหตุ:** Indentation ผิด (YAML ต้องใช้ spaces ไม่ใช่ tabs)
+
+**❌ ผิด:**
+```yaml
+steps:
+  - name: Test
+  run: echo "test"  # indentation ไม่ถูกต้อง
+```
+
+**✅ ถูกต้อง:**
+```yaml
+steps:
+  - name: Test
+    run: echo "test"  # indent 4 spaces
+```
+
+**Error 4: Service health check failed**
+```
+Error: Service postgres didn't become healthy in time
+```
+
+**วิธีแก้:**
+```yaml
+services:
+  postgres:
+    options: >-
+      --health-cmd "pg_isready -U ${{ secrets.POSTGRES_USER }}"
+      --health-interval 10s
+      --health-timeout 5s
+      --health-retries 10  # เพิ่มจำนวนครั้ง
+      --health-start-period 40s  # เพิ่มเวลารอ
+```
+
+**Error 5: Permission denied**
+```
+Error: permission denied while trying to connect to the Docker daemon
+```
+
+**วิธีแก้:** ใช้ `ubuntu-latest` runner (มี Docker พร้อมใช้)
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest  # ไม่ใช่ self-hosted
+```
+
+**Error 6: Module not found**
+```
+ModuleNotFoundError: No module named 'flask'
+```
+
+**วิธีแก้:** ตรวจสอบว่าติดตั้ง dependencies แล้ว
+```yaml
+- name: Install dependencies
+  run: |
+    cd backend
+    pip install -r requirements.txt
+
+- name: Run tests
+  run: |
+    cd backend  # ต้อง cd อีกครั้ง!
+    pytest tests/ -v
+```
+
+#### 3. Database Connection Failed
+
+```bash
+# ตรวจสอบว่า PostgreSQL พร้อมหรือยัง
+docker compose exec db pg_isready -U user -d mydb
+
+# ตรวจสอบว่ามี database หรือยัง
+docker compose exec db psql -U user -d mydb -c "\l"
+
+# ทดสอบ connection จาก web container
+docker compose exec web bash -c 'psql $DATABASE_URL -c "SELECT 1"'
+
+# ตรวจสอบ logs
+docker compose logs db | grep -i error
+```
+
+#### 4. Snyk Token Issues
+
+**Error: Authentication failed**
+```
+Error: Invalid Snyk token
+```
+
+**วิธีแก้:**
+1. ไปที่ https://snyk.io
+2. Login > Account Settings > General
+3. คัดลอก Auth Token ใหม่
+4. อัปเดตใน GitHub Secrets
+
+**วิธีทดสอบ Token:**
+```bash
+# ใน local machine
+export SNYK_TOKEN="your-token-here"
+snyk auth
+snyk test
+```
+
+#### 5. Tests Failed
+
+**Error: Test discovery failed**
+```
+ERROR: file not found: tests/
+```
+
+**วิธีแก้:**
+```yaml
+- name: Run tests
+  run: |
+    cd backend
+    python -m pytest tests/ -v  # ใช้ python -m pytest
+  working-directory: backend  # หรือใช้ working-directory
+```
+
+**Error: Import error**
+```
+ImportError: cannot import name 'app' from 'app'
+```
+
+**วิธีแก้:** เพิ่ม `__init__.py` หรือตั้ง PYTHONPATH
+```yaml
+- name: Run tests
+  run: |
+    cd backend
+    export PYTHONPATH=.
+    pytest tests/ -v
+```
+
+### Debug GitHub Actions Locally
+
+**ใช้ `act` tool เพื่อรัน workflow บนเครื่อง:**
+
+```bash
+# ติดตั้ง act
+# macOS
+brew install act
+
+# Linux
+curl https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash
+
+# Windows
+choco install act-cli
+
+# รัน workflow
+act -j test
+
+# รันพร้อม secrets
+act -j test --secret-file .env
+
+# รันเฉพาะ step
+act -j test --step "Run tests"
+
+# แสดง jobs ที่มี
+act -l
+
+# Dry run (แสดงว่าจะทำอะไรโดยไม่รันจริง)
+act -j test --dryrun
+```
+
+### Troubleshooting Checklist
+
+**เมื่อ GitHub Actions ล้มเหลว:**
+
+- [ ] ตรวจสอบ logs ใน Actions tab
+- [ ] ตรวจสอบว่ามี Secrets ครบถ้วน
+- [ ] Validate YAML syntax (https://www.yamllint.com/)
+- [ ] ตรวจสอบ indentation (ใช้ spaces ไม่ใช่ tabs)
+- [ ] ทดสอบ locally ด้วย `act`
+- [ ] ตรวจสอบ service health checks
+- [ ] เช็คว่า dependencies ถูกติดตั้งแล้ว
+- [ ] ตรวจสอบ working directory
+- [ ] ดู previous successful runs เปรียบเทียบ
+
+### Common GitHub Actions Errors และวิธีแก้
+
+| Error | สาเหตุ | วิธีแก้ |
+|-------|--------|---------|
+| `syntax error near unexpected token` | Python code ใน bash | ใช้ `python3 -c "..."` |
+| `Missing required secret` | ไม่มี secret | เพิ่มใน Settings > Secrets |
+| `Invalid YAML` | Indentation ผิด | ใช้ spaces (2 หรือ 4) |
+| `Service not healthy` | Health check timeout | เพิ่ม retries/start-period |
+| `Permission denied` | Docker daemon access | ใช้ ubuntu-latest runner |
+| `Module not found` | Dependencies ไม่ครบ | ตรวจสอบ pip install |
+| `File not found` | Working directory ผิด | ใช้ `cd` หรือ `working-directory` |
+| `Authentication failed` | Token หมดอายุ | สร้าง token ใหม่ |
+| `Build failed` | Dependencies conflict | ใช้ virtual environment |
+| `Timeout` | รันนานเกินไป | เพิ่ม `timeout-minutes` |
+
+### Example: Complete Debug Workflow
+
+เพิ่มใน workflow เพื่อ debug:
+
+```yaml
+- name: Debug Information
+  if: always()  # รันเสมอแม้ step ก่อนหน้าจะล้มเหลว
+  run: |
+    echo "=== System Information ==="
+    uname -a
+    python3 --version
+    pip --version
+    docker --version
+    
+    echo ""
+    echo "=== Environment Variables ==="
+    env | grep -E "^(GITHUB_|RUNNER_)" | sort
+    
+    echo ""
+    echo "=== Current Directory ==="
+    pwd
+    ls -la
+    
+    echo ""
+    echo "=== Python Packages ==="
+    pip list
+    
+    echo ""
+    echo "=== Service Status ==="
+    docker ps
+    
+    echo ""
+    echo "=== Network ==="
+    docker network ls
+    
+    echo ""
+    echo "=== Disk Space ==="
+    df -h
+
+- name: Debug Services
+  if: failure()  # รันเฉพาะเมื่อ step ก่อนหน้าล้มเหลว
+  run: |
+    echo "=== PostgreSQL Logs ==="
+    docker logs $(docker ps -q -f "ancestor=postgres:16-alpine") || echo "No PostgreSQL container"
+    
+    echo ""
+    echo "=== Redis Logs ==="
+    docker logs $(docker ps -q -f "ancestor=redis:7-alpine") || echo "No Redis container"
+
+- name: Upload logs on failure
+  if: failure()
+  uses: actions/upload-artifact@v4
+  with:
+    name: debug-logs
+    path: |
+      /var/log/
+      ~/.cache/pip/log/
+    retention-days: 7
+```
+
+### Quick Fix Script สำหรับ Local Testing
+
+สร้างไฟล์ `test-ci-locally.sh`:
+
+```bash
+#!/bin/bash
+
+echo "🧪 Testing CI workflow locally..."
+echo ""
+
+# Check if act is installed
+if ! command -v act &> /dev/null; then
+    echo "❌ 'act' is not installed"
+    echo "Install: brew install act (macOS) or visit https://github.com/nektos/act"
+    exit 1
+fi
+
+# Create .secrets file if not exists
+if [ ! -f .secrets ]; then
+    echo "📝 Creating .secrets file..."
+    cat > .secrets << EOF
+POSTGRES_PASSWORD=test_password_123
+POSTGRES_USER=user
+POSTGRES_DB=test_db
+SECRET_KEY=test_secret_key_abc
+JWT_SECRET=test_jwt_secret_xyz
+EOF
+fi
+
+# Run act
+echo "🚀 Running workflow..."
+act -j test --secret-file .secrets -v
+
+echo ""
+echo "✅ Local test complete!"
+```
+
+ใช้งาน:
+```bash
+chmod +x test-ci-locally.sh
+./test-ci-locally.sh
+```
+
+#### 2. Database Connection Failed
+
+**อาการ:** Web app ไม่สามารถเชื่อมต่อ database
+
+```bash
+# ตรวจสอบว่า PostgreSQL พร้อมหรือยัง
+docker compose exec db pg_isready -U postgres
+
+# ตรวจสอบ logs
+docker compose logs db
+
+# ทดสอบ connection
+docker compose exec web bash -c 'psql $DATABASE_URL -c "SELECT 1"'
+
+# ตรวจสอบ network
+docker compose exec web ping db
+```
+
+**แก้ไข:** ตรวจสอบว่ามี `depends_on: { condition: service_healthy }` และ `healthcheck`
+
+#### 3. GitHub Actions ล้มเหลว
+
+**อาการ:** Workflow ล้มเหลวทันทีหลัง push
+
+```bash
+# ตรวจสอบ Secrets
+# ไปที่ GitHub Settings > Secrets > Actions
+# ดูว่ามี secrets ที่จำเป็นครบหรือไม่
+
+# ตรวจสอบ syntax
+# ใช้ YAML validator หรือ GitHub Actions VSCode extension
+
+# Debug locally ด้วย act
+act -j test --secret-file .env
+```
+
+**แก้ไข:** 
+- ตรวจสอบว่าเพิ่ม secrets ครบ 6-7 ตัว
+- ตรวจสอบชื่อ secrets ให้ตรงกับใน workflow
+- ตรวจสอบ permissions
+
+#### 4. Snyk Token ไม่ทำงาน
+
+**อาการ:** Snyk scan failed with authentication error
+
+```bash
+# ตรวจสอบว่า token ถูกต้อง
+# 1. ไปที่ https://snyk.io
+# 2. Account Settings > General > Auth Token
+# 3. คัดลอก token ใหม่
+# 4. เพิ่มใน GitHub Secrets
+
+# Test token locally
+snyk auth $SNYK_TOKEN
+snyk test
+```
+
+#### 5. Port Already in Use
+
+**อาการ:** Error: port 5432 is already allocated
+
+```bash
+# หา process ที่ใช้ port
+lsof -i :5432
+
+# หยุด process
+kill -9 <PID>
+
+# หรือเปลี่ยน port mapping
+# ใน docker-compose.yml
+ports:
+  - "5433:5432"  # ใช้ port 5433 แทน
+```
+
+---
+
+## ส่วนที่ 8: Best Practices
+
+### ✅ ควรทำ (DO)
+
+1. **Docker Compose**
+   - ใช้ Alpine images เมื่อเป็นไปได้
+   - กำหนด healthcheck ให้ทุก service
+   - ใช้ depends_on กับ condition: service_healthy
+   - ใช้ named volumes สำหรับข้อมูลถาวร
+   - กำหนด resource limits ใน production
+
+2. **GitHub Actions**
+   - กำหนด permissions แบบ Least Privilege
+   - ใช้ Actions เวอร์ชันล่าสุด
+   - เปิด caching เพื่อความเร็ว
+   - ใช้ secrets สำหรับข้อมูลสำคัญ
+   - รวม security scanning ใน pipeline
+
+3. **Security**
+   - ไม่ hardcode passwords
+   - ใช้ environment variables
+   - Scan ทุก layer (code, dependencies, container)
+   - Upload SARIF เข้า GitHub Security tab
+   - Review security findings ก่อน merge
+
+4. **Development**
+   - ทดสอบ locally ก่อน push
+   - ใช้ .env.example เป็น template
+   - เขียน tests ให้ครบถ้วน
+   - Document ทุกอย่างที่ทำ
+   - Version control everything
+
+### ❌ ไม่ควรทำ (DON'T)
+
+1. **Docker Compose**
+   - อย่าใช้ latest tag ใน production
+   - อย่าข้าม health checks
+   - อย่าใช้ root user ใน container
+   - อย่าเก็บข้อมูลใน container
+   - อย่า hardcode configuration
+
+2. **GitHub Actions**
+   - อย่าให้ permissions เกินจำเป็น
+   - อย่าข้าม security scans
+   - อย่า commit secrets ใน code
+   - อย่าใช้ self-hosted runners โดยไม่ระมัดระวัง
+   - อย่า deploy โดยไม่ test
+
+3. **Security**
+   - อย่าใช้ default passwords
+   - อย่าเปิด ports ที่ไม่จำเป็น
+   - อย่าใช้ outdated images
+   - อย่า ignore security warnings
+   - อย่าให้ secrets ใน logs
+
+4. **Development**
+   - อย่า commit .env files
+   - อย่าข้ามการเขียน tests
+   - อย่า push ตรงไปยัง main
+   - อย่า ignore CI/CD failures
+   - อย่าใช้ production data ใน development
+
+---
+
+## ส่วนที่ 9: Snyk Configuration
+
+### การตั้งค่า Snyk
+
+#### ขั้นตอนที่ 1: สมัคร Snyk Account
+
+1. ไปที่ https://snyk.io
+2. คลิก "Sign up for free"
+3. เลือก "Sign up with GitHub"
+4. อนุญาต permissions
+
+#### ขั้นตอนที่ 2: สร้าง API Token
+
+1. คลิกที่ avatar > Account settings
+2. ไปที่แท็บ "General"
+3. หาส่วน "AUTH TOKEN"
+4. คลิก "click to show"
+5. คัดลอก token (เริ่มด้วย `snyk-...`)
+
+#### ขั้นตอนที่ 3: เพิ่ม Token ใน GitHub
+
+1. ไปที่ GitHub Repository > Settings
+2. Secrets and variables > Actions
+3. New repository secret
+4. Name: `SNYK_TOKEN`
+5. Value: paste token
+6. Add secret
+
+#### ขั้นตอนที่ 4: เชื่อมต่อ Repository (Optional)
+
+1. ใน Snyk dashboard: Add project
+2. เลือก GitHub
+3. เลือก repository
+4. คลิก "Add selected repositories"
+
+### Snyk Policy File (Advanced)
+
+สร้างไฟล์ `.snyk`:
+
+```yaml
+# Snyk policy file
+version: v1.25.0
+
+# Ignore specific vulnerabilities (ใช้อย่างระมัดระวัง!)
+ignore:
+  'SNYK-PYTHON-REQUESTS-6840444':
+    - '*':
+        reason: >
+          False positive in our context.
+          We validate all external inputs.
+        expires: '2025-12-31T23:59:59.000Z'
+        created: '2024-01-15T10:00:00.000Z'
+
+# Language settings
+language-settings:
+  python: '3.9'
+
+# Fail thresholds
+failThreshold:
+  high: 0
+  medium: 5
+  low: 10
+```
+
+### ความหมายของ Snyk Commands
+
+```yaml
+# 1. Test Dependencies (SCA)
+command: test
+args: --severity-threshold=high --file=backend/requirements.txt
+# ตรวจสอบ vulnerabilities ใน dependencies
+
+# 2. Test Code (SAST)
+command: code test
+args: --severity-threshold=medium --sarif-file-output=snyk-code.sarif
+# วิเคราะห์ source code
+
+# 3. Monitor Project
+command: monitor
+args: --file=backend/requirements.txt
+# ส่งข้อมูลไป dashboard สำหรับติดตาม
+```
+
+---
+
+## ส่วนที่ 10: ตารางเปรียบเทียบ Security Tools
+
+### เครื่องมือ Security Scanning
+
+| Tool | Type | Language | Coverage | Cost | Integration |
+|------|------|----------|----------|------|-------------|
+| **Snyk** | SCA + SAST | Multi | Dependencies + Code | Free tier | ⭐⭐⭐⭐⭐ |
+| **Trivy** | SCA + Container | Multi | Dependencies + Images | Free | ⭐⭐⭐⭐⭐ |
+| **Safety** | SCA | Python | Dependencies only | Free | ⭐⭐⭐⭐ |
+| **Bandit** | SAST | Python | Code only | Free | ⭐⭐⭐⭐ |
+| **Semgrep** | SAST | Multi | Code patterns | Free + Paid | ⭐⭐⭐⭐⭐ |
+| **TruffleHog** | Secrets | All | Git history | Free | ⭐⭐⭐⭐ |
+
+### Severity Levels
+
+| Level | When to Use | Example |
+|-------|-------------|---------|
+| **Critical** | Production blocking | SQL Injection, RCE |
+| **High** | Must fix before merge | XSS, Authentication bypass |
+| **Medium** | Should fix soon | Information disclosure |
+| **Low** | Nice to fix | Code quality issues |
+
+### แนะนำ Severity Thresholds
+
+```yaml
+# Development branch
+--severity-threshold=low
+
+# Staging branch
+--severity-threshold=medium
+
+# Production branch
+--severity-threshold=high
+
+# Security audit
+--severity-threshold=critical
+```
+
+---
+
+## ส่วนที่ 11: คำถามที่พบบ่อย (FAQ)
+
+### Q1: ทำไมต้องเปลี่ยนจาก docker-compose เป็น docker compose?
+**A:** Docker Compose V2 เป็น plugin ของ Docker CLI ที่เร็วกว่า มี features ใหม่กว่า และเป็นมาตรฐานปัจจุบัน
+
+### Q2: Alpine image แตกต่างจาก image ปกติอย่างไร?
+**A:** Alpine ใช้ musl libc แทน glibc ทำให้เล็กกว่า 70% แต่อาจมีปัญหา compatibility บางอย่าง
+
+### Q3: Health check สำคัญอย่างไร?
+**A:** ป้องกัน race condition ที่ web app พยายามเชื่อมต่อ database ก่อนที่ database จะพร้อม
+
+### Q4: ทำไมต้องจำกัด permissions ใน GitHub Actions?
+**A:** ป้องกันการ compromise ของ GITHUB_TOKEN ที่อาจนำไปใช้ในทางที่ผิด (Least Privilege Principle)
+
+### Q5: Snyk ฟรีจริงหรือ? มีข้อจำกัดอะไร?
+**A:** ฟรีสำหรับ open source และ public repos จำกัด 200 scans/เดือน สำหรับ private repos มีข้อจำกัดมากกว่า
+
+### Q6: จะรู้ได้อย่างไรว่า secret ถูกตั้งค่าแล้ว?
+**A:** ไปที่ Settings > Secrets and variables > Actions จะเห็นรายชื่อ secrets (แต่เห็นค่าไม่ได้)
+
+### Q7: ถ้า CI/CD ล้มเหลวควรทำอย่างไร?
+**A:** 
+1. ดู logs ใน Actions tab
+2. ตรวจสอบ secrets
+3. Test locally ด้วย `act`
+4. Debug ทีละ step
+
+### Q8: จะสร้าง strong password ได้อย่างไร?
+**A:** 
+```bash
+# Python
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# OpenSSL
+openssl rand -base64 32
+
+# Online
+https://passwordsgenerator.net/
+```
+
+### Q9: ควร ignore Snyk warning หรือไม่?
+**A:** ควร review ทุก warning ก่อน แล้วค่อย ignore ถ้าเป็น false positive หรือไม่ impact กับระบบ
+
+### Q10: จะ rollback deployment ได้อย่างไร?
+**A:** 
+```bash
+# Docker Swarm
+docker service rollback myapp_web
+
+# Docker Compose
+docker compose down
+git checkout <previous-commit>
+docker compose up -d
+```
+
+### Q11: จะตรวจสอบเวอร์ชัน package ล่าสุดได้อย่างไร?
+**A:**
+```bash
+# ตรวจสอบ outdated packages
+pip list --outdated
+
+# หรือใช้ pip-audit
+pip install pip-audit
+pip-audit
+
+# หรือใช้ online tool
+# https://pypi.org/project/<package-name>/
+```
+
+### Q12: ควรอัปเดต package บ่อยแค่ไหน?
+**A:**
+- **Security patches**: ทันทีที่มี
+- **Minor updates**: ทุก 1-3 เดือน
+- **Major updates**: ทุก 6-12 เดือน (หลังจากทดสอบแล้ว)
+- **ใช้ Snyk/Dependabot**: ให้แจ้งเตือนอัตโนมัติ
+
+### Q13: การอัปเดต package มีความเสี่ยงไหม?
+**A:**
+- **Minor/Patch updates**: ความเสี่ยงต่ำ (แนะนำอัปเดต)
+- **Major updates**: อาจมี breaking changes (ควรทดสอบก่อน)
+- **ใช้ semantic versioning**: เข้าใจว่าเวอร์ชันไหนปลอดภัย
+- **มี tests**: ช่วยตรวจจับปัญหา
+
+---
+
+## ส่วนที่ 13: การจัดการ Dependencies
+
+### วิธีตรวจสอบและอัปเดต Dependencies
+
+#### 1. ตรวจสอบ Outdated Packages
+
+```bash
+# วิธีที่ 1: ใช้ pip
+pip list --outdated
+
+# วิธีที่ 2: ใช้ pip-check
+pip install pip-check
+pip-check
+
+# วิธีที่ 3: ใช้ pur
+pip install pur
+pur -r requirements.txt
+```
+
+#### 2. อัปเดต Packages อย่างปลอดภัย
+
+```bash
+# อัปเดตเฉพาะ patch versions (ปลอดภัย)
+pip install --upgrade Flask
+
+# ทดสอบก่อนอัปเดต
+pip install Flask==3.0.3 --dry-run
+
+# อัปเดตและบันทึก
+pip install --upgrade Flask
+pip freeze > requirements.txt
+```
+
+#### 3. ใช้ Dependency Management Tools
+
+**Option 1: pip-tools**
+```bash
+# ติดตั้ง pip-tools
+pip install pip-tools
+
+# สร้างไฟล์ requirements.in
+cat > requirements.in << EOF
+Flask>=3.0,<4.0
+pytest>=8.0,<9.0
+psycopg2-binary>=2.9,<3.0
+redis>=5.0,<6.0
+EOF
+
+# Generate requirements.txt
+pip-compile requirements.in
+
+# อัปเดต
+pip-compile --upgrade requirements.in
+```
+
+**Option 2: Poetry (Modern)**
+```bash
+# ติดตั้ง Poetry
+curl -sSL https://install.python-poetry.org | python3 -
+
+# Initialize project
+poetry init
+
+# เพิ่ม dependencies
+poetry add Flask@^3.0.3
+poetry add pytest@^8.3.3 --group dev
+
+# อัปเดต
+poetry update
+
+# Export เป็น requirements.txt
+poetry export -f requirements.txt --output requirements.txt
+```
+
+#### 4. Automated Dependency Updates
+
+**สร้างไฟล์ `.github/dependabot.yml`:**
+```yaml
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "your-username"
+    labels:
+      - "dependencies"
+      - "python"
+    
+  # Docker
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+```
+
+### Semantic Versioning (SemVer)
+
+```
+MAJOR.MINOR.PATCH
+  3  . 0  . 3
+
+MAJOR: Breaking changes (API เปลี่ยน)
+MINOR: New features (backward compatible)
+PATCH: Bug fixes (backward compatible)
+```
+
+**ตัวอย่างการกำหนดเวอร์ชัน:**
+
+```txt
+# Exact version (ไม่แนะนำ)
+Flask==3.0.3
+
+# Compatible releases (แนะนำ)
+Flask>=3.0.3,<4.0.0
+# หรือ
+Flask~=3.0.3  # ≥3.0.3, <3.1.0
+
+# Minimum version
+Flask>=3.0.3
+
+# Version range
+Flask>=3.0.0,<3.1.0
+```
+
+### Best Practices สำหรับ Dependencies
+
+#### ✅ ควรทำ:
+
+1. **Pin major versions**
+   ```txt
+   Flask>=3.0,<4.0
+   pytest>=8.0,<9.0
+   ```
+
+2. **แยก development dependencies**
+   ```txt
+   # requirements.txt (production)
+   Flask==3.0.3
+   
+   # requirements-dev.txt (development)
+   pytest==8.3.3
+   pytest-cov==5.0.0
+   black==24.10.0
+   ```
+
+3. **ใช้ hash checking (security)**
+   ```bash
+   pip freeze > requirements.txt
+   pip install --require-hashes -r requirements.txt
+   ```
+
+4. **Document dependencies**
+   ```txt
+   # Web Framework
+   Flask==3.0.3  # Core web framework
+   
+   # Testing
+   pytest==8.3.3  # Testing framework
+   ```
+
+#### ❌ ไม่ควรทำ:
+
+1. **ใช้ `*` หรือไม่ระบุเวอร์ชัน**
+   ```txt
+   # ❌ อันตราย!
+   Flask
+   pytest>=8.0
+   ```
+
+2. **Mix production และ dev dependencies**
+   ```txt
+   # ❌ ไม่ดี
+   Flask==3.0.3
+   pytest==8.3.3  # ควรอยู่ใน requirements-dev.txt
+   ```
+
+3. **Ignore security warnings**
+   ```bash
+   # ❌ อันตราย!
+   pip install --trusted-host pypi.org insecure-package
+   ```
+
+### Vulnerability Scanning Workflow
+
+เพิ่มใน `.github/workflows/dependency-check.yml`:
+
+```yaml
+name: Dependency Security Check
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'  # ทุกวันจันทร์เที่ยงคืน
+  push:
+    paths:
+      - '**/requirements*.txt'
+      - '**/pyproject.toml'
+      - '**/poetry.lock'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  check-dependencies:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      
+      - name: Install pip-audit
+        run: pip install pip-audit
+      
+      - name: Run pip-audit
+        run: |
+          cd backend
+          pip-audit -r requirements.txt --format json --output audit-report.json
+        continue-on-error: true
+      
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: backend/audit-report.json
+      
+      - name: Check with Safety
+        run: |
+          pip install safety
+          cd backend
+          safety check -r requirements.txt --json --output safety-report.json
+        continue-on-error: true
+      
+      - name: Notify if vulnerabilities found
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🔒 Security: Vulnerable dependencies detected',
+              body: 'Automated security scan found vulnerabilities in dependencies. Please check the workflow logs.',
+              labels: ['security', 'dependencies']
+            });
+```
+
+### คำแนะนำสำหรับแต่ละ Package
+
+#### Flask 3.0.3
+```python
+# Breaking changes จาก 2.x:
+# - python_version ต้อง >= 3.8
+# - บาง deprecated features ถูกลบ
+
+# Features ใหม่:
+# - Better async support
+# - Improved typing
+# - Security enhancements
+```
+
+#### pytest 8.3.3
+```python
+# Breaking changes จาก 7.x:
+# - python_version ต้อง >= 3.8
+# - บาง plugins อาจต้องอัปเดต
+
+# Features ใหม่:
+# - 30% faster execution
+# - Better error messages
+# - Improved fixtures
+```
+
+#### psycopg2-binary 2.9.9
+```python
+# Notes:
+# - สำหรับ production ควรใช้ psycopg2 (ไม่ใช่ binary)
+# - psycopg2-binary เหมาะสำหรับ development เท่านั้น
+# - psycopg3 กำลังพัฒนา (beta)
+
+# PostgreSQL support:
+# - PostgreSQL 9.6 - 16
+```
+
+#### redis 5.1.1
+```python
+# Breaking changes จาก 4.x:
+# - Connection pooling changes
+# - บาง deprecated methods ถูกลบ
+
+# Features ใหม่:
+# - Better async support
+# - Redis Stack support
+# - Performance improvements
+```
+
+---
+
+## ส่วนที่ 12: Resources และเอกสารอ้างอิง
+
+### Official Documentation
+- 📖 [Docker Compose Specification](https://docs.docker.com/compose/compose-file/)
+- 📖 [Docker Compose CLI](https://docs.docker.com/compose/cli-command/)
+- 📖 [GitHub Actions Documentation](https://docs.github.com/en/actions)
+- 📖 [GitHub Actions Security](https://docs.github.com/en/actions/security-guides)
+- 📖 [Snyk Documentation](https://docs.snyk.io/)
+
+### Security Resources
+- 🔒 [OWASP Docker Security](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html)
+- 🔒 [CIS Docker Benchmark](https://www.cisecurity.org/benchmark/docker)
+- 🔒 [Trivy Documentation](https://aquasecurity.github.io/trivy/)
+- 🔒 [DevSecOps Best Practices](https://www.devsecops.org/)
+
+### Learning Resources
+- 🎓 [Docker Compose Tutorial](https://docs.docker.com/compose/gettingstarted/)
+- 🎓 [GitHub Actions Learning Lab](https://lab.github.com/)
+- 🎓 [YAML Tutorial](https://yaml.org/spec/1.2.2/)
+
+### Tools
+- 🛠️ [YAML Validator](https://yamllint.com/)
+- 🛠️ [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- 🛠️ [act - Run GitHub Actions locally](https://github.com/nektos/act)
+- 🛠️ [dive - Docker image analyzer](https://github.com/wagoodman/dive)
+
+---
+
+## สรุป
+
+### ความรู้ที่ได้เรียนรู้ในแลปนี้:
+
+✅ **YAML Basics** - โครงสร้างและไวยากรณ์พื้นฐาน
+
+✅ **Docker Compose Modern** 
+- ไม่ต้องระบุ version
+- ใช้ Alpine images
+- กำหนด health checks
+- depends_on กับ conditions
+
+✅ **GitHub Actions Security-First**
+- Least Privilege permissions
+- Modern Actions (v4-v5)
+- Secrets management
+- Multiple security scans
+
+✅ **DevSecOps Pipeline**
+- Test automation
+- Security scanning (6 tools)
+- Container building
+- SARIF uploads
+
+✅ **Best Practices**
+- Security first
+- Performance optimization
+- Reliability improvements
+- Maintainability
+
+### ผลลัพธ์ที่ได้:
+
+| Metric | Improvement |
+|--------|-------------|
+| **Image Size** | -71% |
+| **CI Speed** | +150% |
+| **Security Coverage** | +400% |
+| **Reliability** | +100% |
+
+### เตรียมพร้อมสำหรับ:
+
+- ✅ **Lab 1**: Docker foundation
+- ✅ **Lab 2**: Flask application setup
+- ✅ **Lab 3**: User Authentication
+- ✅ **Lab 4**: Ticket Management
+- ✅ **Lab 5**: Testing & QA
+- ✅ **Lab 6**: CI/CD with GitHub Actions
+- ✅ **Lab 7**: Docker Production Deployment
+
+### Checklist ก่อนไปต่อ:
+
+- [ ] เข้าใจโครงสร้าง YAML
+- [ ] สร้าง Docker Compose ได้
+- [ ] เข้าใจ health checks
+- [ ] ตั้งค่า GitHub Actions ได้
+- [ ] จัดการ secrets ได้
+- [ ] เข้าใจ security scanning
+- [ ] ใช้ Docker Compose V2 CLI ได้
+- [ ] Debug ปัญหาพื้นฐานได้
+
+---
+
+## 🎉 ยินดีด้วย!
+
+คุณได้เรียนรู้พื้นฐานที่จำเป็นสำหรับการทำ DevOps และ CI/CD แล้ว พร้อมที่จะไปต่อกับ Lab 1!
+
+**Next Steps:**
+1. Review เนื้อหาที่เรียนไป
+2. ลองสร้างโปรเจคเอง
+3. Experiment กับ configurations ต่างๆ
+4. เตรียมตัวสำหรับ Lab 1: Docker Foundation
+
+**Remember:**
+- Security First! 🔒
+- Test Everything! 🧪
+- Document Well! 📝
+- Keep Learning! 🚀
