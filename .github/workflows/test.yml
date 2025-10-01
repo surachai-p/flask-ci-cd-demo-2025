@@ -1,0 +1,38 @@
+name: Test Pipeline
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_USER: testuser
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+      
+      - run: |
+          cd backend
+          pip install -r requirements.txt
+      
+      - run: |
+          export DATABASE_URL="postgresql://testuser:testpass@localhost:5432/testdb"
+          cd backend
+          pytest tests/ -v
+        env:
+          SECRET_KEY: test-secret-key
