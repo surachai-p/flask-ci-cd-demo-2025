@@ -1,0 +1,14 @@
+# Modern Docker Compose - ไม่ต้องระบุ version
+
+services:
+  # Web Application Service
+  web:
+    build: .
+    container_name: flask_app
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - DATABASE_URL=postgresql://user:pass@db:5432/mydb
+    depends_on:
+  
