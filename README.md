@@ -10,31 +10,31 @@ Demo project สำหรับ Lab 00 - Docker Compose และ GitHub Actions
 ## Quick Start
 
 1. Clone repository:
-\`\`\`bash
+```bash
 git clone <your-repo-url>
 cd my-flask-app
-\`\`\`
+```
 
 2. Setup environment:
-\`\`\`bash
+```bash
 cp .env.example .env
 # แก้ไขค่าใน .env
-\`\`\`
+```
 
 3. Start services:
-\`\`\`bash
+```bash
 docker compose up -d
-\`\`\`
+```
 
 4. Test API:
-\`\`\`bash
+```bash
 curl http://localhost:5000/
 curl http://localhost:5000/health
-\`\`\`
+```
 
 ## Project Structure
 
-\`\`\`
+```
 my-flask-app/
 ├── backend/
 │   ├── app.py
@@ -49,4 +49,4 @@ my-flask-app/
 ├── .env.example
 ├── .gitignore
 └── README.md
-\`\`\`
+```
